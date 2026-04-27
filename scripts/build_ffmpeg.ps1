@@ -91,6 +91,23 @@ $SourceUnix = Convert-ToMsysPath $SourceDir
 $BuildUnix = Convert-ToMsysPath $BuildDir
 $PrefixUnix = Convert-ToMsysPath $Prefix
 
+$RequiredUnixSources = @(
+    "$SourceUnix/configure",
+    "$SourceUnix/Makefile",
+    "$SourceUnix/ffbuild/common.mak",
+    "$SourceUnix/ffbuild/library.mak",
+    "$SourceUnix/libavformat/Makefile",
+    "$SourceUnix/libavcodec/Makefile",
+    "$SourceUnix/libavutil/Makefile"
+)
+foreach ($SourceFile in $RequiredUnixSources) {
+    $CheckCommand = "test -f $(Quote-Sh $SourceFile)"
+    & $Bash -lc $CheckCommand
+    if ($LASTEXITCODE -ne 0) {
+        throw "Missing FFmpeg source file visible from MSYS2: $SourceFile. Commit the full third_party/FFmpeg source tree to GitHub before building wheels."
+    }
+}
+
 $ConfigureArgs = @(
     "--prefix=$PrefixUnix",
     "--toolchain=msvc",
@@ -137,33 +154,18 @@ $PrefixIncludeQ = Quote-Sh "$PrefixUnix/include/"
 $PrefixLibQ = Quote-Sh "$PrefixUnix/lib/"
 $PrefixBinQ = Quote-Sh "$PrefixUnix/bin/"
 
-$Script = @"
-set -euo pipefail
-for required in \
-  "$SourceUnix/configure" \
-  "$SourceUnix/Makefile" \
-  "$SourceUnix/ffbuild/common.mak" \
-  "$SourceUnix/ffbuild/library.mak" \
-  "$SourceUnix/libavformat/Makefile" \
-  "$SourceUnix/libavcodec/Makefile" \
-  "$SourceUnix/libavutil/Makefile"; do
-  if [ ! -f "`$required" ]; then
-    echo "Missing FFmpeg source file visible from MSYS2: `$required" >&2
-    echo "Commit the full third_party/FFmpeg source tree to GitHub before building wheels." >&2
-    exit 1
-  fi
-done
-mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ
-cd $BuildUnixQ
-if [ ! -f config.mak ]; then
-  $ConfigureCommand
-fi
-make -j`$(nproc)
-make install
-cp -a ${PrefixIncludeQ}* $RootIncludeQ
-cp -a ${PrefixLibQ}*.lib $RootLibQ
-cp -a ${PrefixBinQ}*.dll $RootLibQ
-"@
+$ScriptLines = @(
+    "set -euo pipefail",
+    "mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ",
+    "cd $BuildUnixQ",
+    "if [ ! -f config.mak ]; then $ConfigureCommand; fi",
+    "make -j`$(nproc)",
+    "make install",
+    "cp -a ${PrefixIncludeQ}* $RootIncludeQ",
+    "cp -a ${PrefixLibQ}*.lib $RootLibQ",
+    "cp -a ${PrefixBinQ}*.dll $RootLibQ"
+)
+$Script = $ScriptLines -join "`n"
 
 & $Bash -lc $Script
 if ($LASTEXITCODE -ne 0) {
