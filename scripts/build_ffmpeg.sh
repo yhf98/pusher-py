@@ -16,32 +16,53 @@ mkdir -p "${BUILD_DIR}" "${PREFIX}" "${ROOT_DIR}/include" "${ROOT_DIR}/lib"
 cd "${BUILD_DIR}"
 
 if [[ ! -f config.mak ]]; then
-  "${SRC_DIR}/configure" \
-    --prefix="${PREFIX}" \
-    --enable-shared \
-    --disable-static \
-    --disable-programs \
-    --disable-doc \
-    --disable-debug \
-    --disable-autodetect \
-    --disable-asm \
-    --disable-x86asm \
-    --disable-avfilter \
-    --disable-avdevice \
-    --disable-swscale \
-    --disable-swresample \
-    --disable-postproc \
-    --enable-network \
-    --disable-everything \
-    --enable-avformat \
-    --enable-avcodec \
-    --enable-avutil \
-    --enable-protocol=file,pipe,tcp,udp,rtmp,rtmpt,rtsp,http,rtp \
-    --enable-demuxer=mov,mp4,m4a,3gp,3g2,mj2,flv,rtsp,rtp,mpegts,h264,hevc,aac,matroska \
-    --enable-muxer=flv,rtsp,rtp,mpegts,mp4,null \
-    --enable-parser=h264,hevc,aac,mpeg4video \
-    --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
-    --enable-pic
+  configure_help="$("${SRC_DIR}/configure" --help 2>/dev/null || true)"
+  configure_args=(
+    "--prefix=${PREFIX}"
+    "--enable-shared"
+    "--disable-static"
+    "--disable-programs"
+    "--disable-doc"
+    "--disable-debug"
+    "--disable-autodetect"
+    "--disable-asm"
+    "--disable-x86asm"
+    "--disable-avfilter"
+    "--disable-avdevice"
+    "--disable-swscale"
+    "--disable-swresample"
+    "--disable-postproc"
+    "--enable-network"
+    "--disable-everything"
+    "--enable-avformat"
+    "--enable-avcodec"
+    "--enable-avutil"
+    "--enable-protocol=file,pipe,tcp,udp,rtmp,rtmpt,rtsp,http,rtp"
+    "--enable-demuxer=mov,mp4,m4a,3gp,3g2,mj2,flv,rtsp,rtp,mpegts,h264,hevc,aac,matroska"
+    "--enable-muxer=flv,rtsp,rtp,mpegts,mp4,null"
+    "--enable-parser=h264,hevc,aac,mpeg4video"
+    "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc"
+    "--enable-pic"
+  )
+
+  supported_args=()
+  for arg in "${configure_args[@]}"; do
+    option="${arg%%=*}"
+    case "${option}" in
+      --prefix)
+        supported_args+=("${arg}")
+        ;;
+      *)
+        if grep -q -- "${option}" <<<"${configure_help}"; then
+          supported_args+=("${arg}")
+        else
+          echo "Skipping unsupported FFmpeg configure option: ${arg}" >&2
+        fi
+        ;;
+    esac
+  done
+
+  "${SRC_DIR}/configure" "${supported_args[@]}"
 fi
 
 make -j"$(nproc)"

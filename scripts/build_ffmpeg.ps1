@@ -72,7 +72,6 @@ $BuildUnix = Convert-ToMsysPath $BuildDir
 $PrefixUnix = Convert-ToMsysPath $Prefix
 
 $ConfigureArgs = @(
-    "$SourceUnix/configure",
     "--prefix=$PrefixUnix",
     "--toolchain=msvc",
     "--target-os=$TargetOs",
@@ -101,7 +100,17 @@ $ConfigureArgs = @(
     "--enable-parser=h264,hevc,aac,mpeg4video",
     "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc"
 )
-$ConfigureCommand = ($ConfigureArgs | ForEach-Object { Quote-Sh $_ }) -join " "
+$ConfigureHelp = (& $Bash -lc "$(Quote-Sh "$SourceUnix/configure") --help" 2>$null) -join "`n"
+$SupportedConfigureArgs = @()
+foreach ($Arg in $ConfigureArgs) {
+    $Option = ($Arg -split "=", 2)[0]
+    if ($Option -in @("--prefix", "--toolchain", "--target-os", "--arch") -or $ConfigureHelp.Contains($Option)) {
+        $SupportedConfigureArgs += $Arg
+    } else {
+        Write-Warning "Skipping unsupported FFmpeg configure option: $Arg"
+    }
+}
+$ConfigureCommand = ((@("$SourceUnix/configure") + $SupportedConfigureArgs) | ForEach-Object { Quote-Sh $_ }) -join " "
 
 New-Item -ItemType Directory -Force -Path $BuildDir, $Prefix, $IncludeDir, $LibDir | Out-Null
 $env:MSYS2_PATH_TYPE = "inherit"
