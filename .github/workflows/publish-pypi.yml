@@ -1,0 +1,313 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "Publish target"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PACKAGE_DIR: "."
+
+jobs:
+  build-linux-wheels:
+    name: Build Linux wheels (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+          - aarch64
+          - armv7l
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        if: matrix.arch != 'x86_64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip "cibuildwheel>=3,<4" twine
+
+      - name: Verify required package files
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          test -f pyproject.toml
+          test -f setup.py
+          test -f README.md
+          test -f SDK_API.md
+          test -x scripts/build_ffmpeg.sh
+          test -d include
+          test -d src/pusher
+          test -f MANIFEST.in
+          if [ ! -d third_party/FFmpeg ]; then
+            echo "third_party/FFmpeg is required in the GitHub repository for CI wheel builds." >&2
+            exit 1
+          fi
+          if ! grep -q '^prune third_party$' MANIFEST.in; then
+            echo "MANIFEST.in must prune third_party so FFmpeg source is not published to PyPI." >&2
+            exit 1
+          fi
+
+      - name: Clean previous build outputs
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: rm -rf build dist src/*.egg-info src/pusher/*.so lib .ffmpeg-prefix
+
+      - name: Build repaired wheels
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "cp31?t-* *-musllinux_* pp*"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux2014
+          CIBW_MANYLINUX_ARMV7L_IMAGE: manylinux_2_31
+          CIBW_BEFORE_BUILD_LINUX: >
+            test -f lib/libavformat.so || bash scripts/build_ffmpeg.sh
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: >
+            python -c "from pusher import Pusher, version; print(version(), Pusher)" &&
+            python -m pytest {project}/tests -q
+        run: python -m cibuildwheel --output-dir dist
+
+      - name: Check package metadata
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: python -m twine check dist/*
+
+      - name: Inspect wheel contents
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          python - <<'PY'
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          wheels = list(Path("dist").glob("*.whl"))
+          if not wheels:
+              raise SystemExit("expected at least one wheel")
+
+          for wheel_path in wheels:
+              with zipfile.ZipFile(wheel_path) as wheel:
+                  names = wheel.namelist()
+                  if any(name.startswith("third_party/") or "/third_party/" in name for name in names):
+                      raise SystemExit(f"{wheel_path.name} must not include third_party/FFmpeg")
+                  if any(name.endswith((".pyc", ".pyd", ".dll", ".dylib")) for name in names):
+                      raise SystemExit(f"{wheel_path.name} contains unexpected generated files")
+                  if not any(name.startswith("pusher/") and "_native" in name and name.endswith(".so") for name in names):
+                      raise SystemExit(f"{wheel_path.name} does not contain pusher native extension")
+                  if not any("libavformat" in name and ".so" in name for name in names):
+                      raise SystemExit(f"{wheel_path.name} does not bundle FFmpeg runtime libraries")
+          PY
+
+      - name: Show distribution files
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: ls -lh dist
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels-${{ matrix.arch }}
+          path: ${{ env.PACKAGE_DIR }}/dist/*
+          if-no-files-found: error
+
+  build-windows-wheels:
+    name: Build Windows wheels (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            cibw_arch: x86
+            vc_arch: x86
+          - arch: x64
+            cibw_arch: AMD64
+            vc_arch: x64
+          - arch: arm64
+            cibw_arch: ARM64
+            vc_arch: amd64_arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.vc_arch }}
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          path-type: inherit
+          install: make diffutils
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip "cibuildwheel>=3,<4" twine delvewheel
+
+      - name: Verify required package files
+        working-directory: ${{ env.PACKAGE_DIR }}
+        shell: pwsh
+        run: |
+          foreach ($path in @("pyproject.toml", "setup.py", "README.md", "SDK_API.md", "MANIFEST.in", "scripts/build_ffmpeg.ps1")) {
+            if (!(Test-Path $path)) { throw "missing required file: $path" }
+          }
+          if (!(Test-Path "third_party/FFmpeg")) {
+            throw "third_party/FFmpeg is required in the GitHub repository for CI wheel builds."
+          }
+          if (!(Select-String -Path "MANIFEST.in" -Pattern "^prune third_party$" -Quiet)) {
+            throw "MANIFEST.in must prune third_party so FFmpeg source is not published to PyPI."
+          }
+
+      - name: Clean previous build outputs
+        working-directory: ${{ env.PACKAGE_DIR }}
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue build, dist, lib, .ffmpeg-prefix
+          Remove-Item -Force -ErrorAction SilentlyContinue src/pusher/*.pyd, src/pusher/*.so
+          Get-ChildItem -Directory -ErrorAction SilentlyContinue src/*.egg-info | Remove-Item -Recurse -Force
+
+      - name: Build repaired wheels
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          CIBW_ARCHS_WINDOWS: ${{ matrix.cibw_arch }}
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "cp31?t-* pp*"
+          CIBW_TEST_SKIP: "*-win_arm64"
+          CIBW_BEFORE_BUILD_WINDOWS: >
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_ffmpeg.ps1 -Arch ${{ matrix.cibw_arch }}
+          CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
+            python -m delvewheel repair --add-path "${{ github.workspace }}\lib" -w {dest_dir} {wheel}
+          CIBW_TEST_REQUIRES: pytest
+          CIBW_TEST_COMMAND: >
+            python -c "from pusher import Pusher, version; print(version(), Pusher)" &&
+            python -m pytest {project}\tests -q
+        run: python -m cibuildwheel --output-dir dist
+
+      - name: Check package metadata
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: python -m twine check dist/*
+
+      - name: Inspect wheel contents
+        working-directory: ${{ env.PACKAGE_DIR }}
+        shell: pwsh
+        run: |
+          @'
+          import zipfile
+          from pathlib import Path
+
+          wheels = list(Path("dist").glob("*.whl"))
+          if not wheels:
+              raise SystemExit("expected at least one wheel")
+
+          for wheel_path in wheels:
+              with zipfile.ZipFile(wheel_path) as wheel:
+                  names = wheel.namelist()
+                  if any(name.startswith("third_party/") or "/third_party/" in name for name in names):
+                      raise SystemExit(f"{wheel_path.name} must not include third_party/FFmpeg")
+                  if not any(name.startswith("pusher/") and "_native" in name and name.endswith(".pyd") for name in names):
+                      raise SystemExit(f"{wheel_path.name} does not contain pusher native extension")
+                  if not any(name.lower().endswith(".dll") and "avformat" in name.lower() for name in names):
+                      raise SystemExit(f"{wheel_path.name} does not bundle FFmpeg runtime DLLs")
+                  if any(name.endswith((".pyc", ".so", ".dylib")) for name in names):
+                      raise SystemExit(f"{wheel_path.name} contains unexpected generated files")
+          '@ | python -
+
+      - name: Show distribution files
+        working-directory: ${{ env.PACKAGE_DIR }}
+        shell: pwsh
+        run: Get-ChildItem dist
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels-windows-${{ matrix.arch }}
+          path: ${{ env.PACKAGE_DIR }}/dist/*
+          if-no-files-found: error
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs:
+      - build-linux-wheels
+      - build-windows-wheels
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.repository == 'testpypi'
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/pusher-py/
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: python-wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish package to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs:
+      - build-linux-wheels
+      - build-windows-wheels
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.repository == 'pypi')
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pusher-py/
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: python-wheels-*
+          merge-multiple: true
+          path: dist
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
