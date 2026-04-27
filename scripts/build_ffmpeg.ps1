@@ -164,14 +164,45 @@ $ScriptLines = @(
     "/usr/bin/make -j`$(/usr/bin/nproc)",
     "/usr/bin/make install",
     "/usr/bin/cp -a ${PrefixIncludeQ}* $RootIncludeQ",
-    "/usr/bin/cp -a ${PrefixLibQ}*.lib $RootLibQ",
-    "/usr/bin/cp -a ${PrefixBinQ}*.dll $RootLibQ"
+    "for pattern in ${PrefixLibQ}*.lib ${PrefixBinQ}*.lib ${PrefixBinQ}*.dll; do if [ -e `"`$pattern`" ]; then /usr/bin/cp -a `"`$pattern`" $RootLibQ; fi; done",
+    "echo `"Windows FFmpeg SDK lib directory:`"",
+    "/usr/bin/find $RootLibQ -maxdepth 1 -type f | /usr/bin/sort"
 )
 $Script = $ScriptLines -join "`n"
 
 & $Bash -lc $Script
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
+}
+
+$RequiredComponents = @("avformat", "avcodec", "avutil")
+foreach ($Component in $RequiredComponents) {
+    $PlainImportLib = Join-Path $LibDir "$Component.lib"
+    $PrefixedImportLib = Join-Path $LibDir "lib$Component.lib"
+    if (!(Test-Path $PlainImportLib) -and (Test-Path $PrefixedImportLib)) {
+        Copy-Item -Force $PrefixedImportLib $PlainImportLib
+    }
+}
+
+$MissingArtifacts = @()
+foreach ($Component in $RequiredComponents) {
+    $PlainImportLib = Join-Path $LibDir "$Component.lib"
+    $PrefixedImportLib = Join-Path $LibDir "lib$Component.lib"
+    if (!(Test-Path $PlainImportLib) -and !(Test-Path $PrefixedImportLib)) {
+        $MissingArtifacts += "$Component import library (.lib)"
+    }
+
+    $RuntimeDlls = Get-ChildItem -Path $LibDir -Filter "*$Component*.dll" -File -ErrorAction SilentlyContinue
+    if (!$RuntimeDlls) {
+        $MissingArtifacts += "$Component runtime DLL (.dll)"
+    }
+}
+
+if ($MissingArtifacts.Count -gt 0) {
+    Write-Host "Files found in ${LibDir}:"
+    Get-ChildItem -Path $LibDir -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Write-Host "  $($_.Name)" }
+    $MissingText = $MissingArtifacts -join ", "
+    throw "FFmpeg Windows SDK build is incomplete. Missing: $MissingText"
 }
 
 Write-Host "FFmpeg SDK built into:"

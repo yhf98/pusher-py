@@ -13,19 +13,61 @@ ROOT = Path(__file__).parent
 LOCAL_INCLUDE = ROOT / "include"
 LOCAL_LIB = ROOT / "lib"
 IS_WINDOWS = sys.platform == "win32"
+FFMPEG_COMPONENTS = ("avformat", "avcodec", "avutil")
+
+
+def windows_import_library(component: str):
+    for name in (component, f"lib{component}"):
+        if (LOCAL_LIB / f"{name}.lib").exists():
+            return name
+    return None
+
+
+def has_windows_ffmpeg() -> bool:
+    return all(
+        windows_import_library(component)
+        and any(LOCAL_LIB.glob(f"*{component}*.dll"))
+        for component in FFMPEG_COMPONENTS
+    )
 
 
 def has_local_ffmpeg() -> bool:
     if IS_WINDOWS:
-        return (
-            (LOCAL_LIB / "avformat.lib").exists()
-            and any(LOCAL_LIB.glob("avformat*.dll"))
-            and (LOCAL_LIB / "avcodec.lib").exists()
-            and any(LOCAL_LIB.glob("avcodec*.dll"))
-            and (LOCAL_LIB / "avutil.lib").exists()
-            and any(LOCAL_LIB.glob("avutil*.dll"))
-        )
+        return has_windows_ffmpeg()
     return (LOCAL_LIB / "libavformat.so").exists()
+
+
+def require_local_ffmpeg() -> None:
+    if has_local_ffmpeg():
+        return
+
+    if IS_WINDOWS:
+        found = ", ".join(sorted(path.name for path in LOCAL_LIB.glob("*"))) if LOCAL_LIB.exists() else "<missing lib/>"
+        missing = []
+        for component in FFMPEG_COMPONENTS:
+            if not windows_import_library(component):
+                missing.append(f"{component}.lib")
+            if not any(LOCAL_LIB.glob(f"*{component}*.dll")):
+                missing.append(f"{component}.dll")
+        raise RuntimeError(
+            "local FFmpeg Windows SDK is incomplete. "
+            f"Missing: {', '.join(missing)}. Found in lib/: {found}"
+        )
+
+    raise RuntimeError("local FFmpeg SDK is incomplete. Expected lib/libavformat.so")
+
+
+def ffmpeg_library_names() -> list[str]:
+    if not IS_WINDOWS:
+        return list(FFMPEG_COMPONENTS)
+
+    libraries = []
+    for component in FFMPEG_COMPONENTS:
+        library = windows_import_library(component)
+        if library is None:
+            raise RuntimeError(f"missing FFmpeg import library for {component}")
+        libraries.append(library)
+    return libraries
 
 
 def ensure_soname_links() -> None:
@@ -86,15 +128,17 @@ def ensure_local_ffmpeg() -> None:
             cwd=str(ROOT),
             check=True,
         )
+        require_local_ffmpeg()
     else:
         subprocess.run([str(script)], cwd=str(ROOT), check=True)
         ensure_soname_links()
+        require_local_ffmpeg()
 
 
 ensure_local_ffmpeg()
 
 ffmpeg_cflags = [f"-I{LOCAL_INCLUDE}"]
-ffmpeg_libraries = ["avformat", "avcodec", "avutil"]
+ffmpeg_libraries = ffmpeg_library_names()
 
 ffmpeg_runtime_args: list[str] = []
 if sys.platform.startswith("linux") and LOCAL_LIB.exists():
