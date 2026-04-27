@@ -17,6 +17,23 @@ if (!(Test-Path $SourceDir)) {
     throw "FFmpeg source not found: $SourceDir"
 }
 
+$RequiredSources = @(
+    "configure",
+    "Makefile",
+    "ffbuild\common.mak",
+    "ffbuild\library.mak",
+    "libavformat\Makefile",
+    "libavcodec\Makefile",
+    "libavutil\Makefile"
+)
+$MissingSources = @(
+    $RequiredSources | Where-Object { !(Test-Path (Join-Path $SourceDir $_)) }
+)
+if ($MissingSources.Count -gt 0) {
+    $MissingText = $MissingSources -join ", "
+    throw "FFmpeg source tree is incomplete: $SourceDir. Missing required files: $MissingText. Commit the full third_party/FFmpeg source tree to GitHub, including Makefile and ffbuild/*.mak."
+}
+
 foreach ($tool in @("cl.exe", "link.exe", "lib.exe")) {
     if (!(Get-Command $tool -ErrorAction SilentlyContinue)) {
         throw "$tool was not found. Run this script from a Visual Studio Developer shell, or use the GitHub Actions workflow."
@@ -91,7 +108,6 @@ $ConfigureArgs = @(
     "--disable-avdevice",
     "--disable-swscale",
     "--disable-swresample",
-    "--disable-postproc",
     "--enable-network",
     "--disable-everything",
     "--enable-avformat",
@@ -103,17 +119,12 @@ $ConfigureArgs = @(
     "--enable-parser=h264,hevc,aac,mpeg4video",
     "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc"
 )
-$ConfigureHelp = (& $Bash -lc "$(Quote-Sh "$SourceUnix/configure") --help" 2>$null) -join "`n"
-$SupportedConfigureArgs = @()
-foreach ($Arg in $ConfigureArgs) {
-    $Option = ($Arg -split "=", 2)[0]
-    if ($Option -in @("--prefix", "--toolchain", "--target-os", "--arch") -or $ConfigureHelp.Contains($Option)) {
-        $SupportedConfigureArgs += $Arg
-    } else {
-        Write-Warning "Skipping unsupported FFmpeg configure option: $Arg"
-    }
+
+if ($Arch.ToUpperInvariant() -eq "ARM64") {
+    $ConfigureArgs += "--enable-cross-compile"
 }
-$ConfigureCommand = ((@("$SourceUnix/configure") + $SupportedConfigureArgs) | ForEach-Object { Quote-Sh $_ }) -join " "
+
+$ConfigureCommand = ((@("$SourceUnix/configure") + $ConfigureArgs) | ForEach-Object { Quote-Sh $_ }) -join " "
 
 New-Item -ItemType Directory -Force -Path $BuildDir, $Prefix, $IncludeDir, $LibDir | Out-Null
 $env:MSYS2_PATH_TYPE = "inherit"
@@ -128,6 +139,20 @@ $PrefixBinQ = Quote-Sh "$PrefixUnix/bin/"
 
 $Script = @"
 set -euo pipefail
+for required in \
+  "$SourceUnix/configure" \
+  "$SourceUnix/Makefile" \
+  "$SourceUnix/ffbuild/common.mak" \
+  "$SourceUnix/ffbuild/library.mak" \
+  "$SourceUnix/libavformat/Makefile" \
+  "$SourceUnix/libavcodec/Makefile" \
+  "$SourceUnix/libavutil/Makefile"; do
+  if [ ! -f "`$required" ]; then
+    echo "Missing FFmpeg source file visible from MSYS2: `$required" >&2
+    echo "Commit the full third_party/FFmpeg source tree to GitHub before building wheels." >&2
+    exit 1
+  fi
+done
 mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ
 cd $BuildUnixQ
 if [ ! -f config.mak ]; then

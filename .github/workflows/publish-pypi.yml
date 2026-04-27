@@ -42,6 +42,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Set up QEMU
         if: matrix.arch != 'x86_64'
@@ -68,10 +69,7 @@ jobs:
           test -d include
           test -d src/pusher
           test -f MANIFEST.in
-          if [ ! -d third_party/FFmpeg ]; then
-            echo "third_party/FFmpeg is required in the GitHub repository for CI wheel builds." >&2
-            exit 1
-          fi
+          python scripts/check_ffmpeg_source.py
           if ! grep -q '^prune third_party$' MANIFEST.in; then
             echo "MANIFEST.in must prune third_party so FFmpeg source is not published to PyPI." >&2
             exit 1
@@ -131,6 +129,16 @@ jobs:
         working-directory: ${{ env.PACKAGE_DIR }}
         run: ls -lh dist
 
+      - name: Upload FFmpeg build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-linux-logs-${{ matrix.arch }}
+          path: |
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg/ffbuild/config.log
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg/config.log
+          if-no-files-found: ignore
+
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -160,6 +168,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Set up MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -184,12 +193,10 @@ jobs:
         working-directory: ${{ env.PACKAGE_DIR }}
         shell: pwsh
         run: |
-          foreach ($path in @("pyproject.toml", "setup.py", "README.md", "SDK_API.md", "MANIFEST.in", "scripts/build_ffmpeg.ps1")) {
+          foreach ($path in @("pyproject.toml", "setup.py", "README.md", "SDK_API.md", "MANIFEST.in", "scripts/build_ffmpeg.ps1", "scripts/check_ffmpeg_source.py")) {
             if (!(Test-Path $path)) { throw "missing required file: $path" }
           }
-          if (!(Test-Path "third_party/FFmpeg")) {
-            throw "third_party/FFmpeg is required in the GitHub repository for CI wheel builds."
-          }
+          python scripts/check_ffmpeg_source.py
           if (!(Select-String -Path "MANIFEST.in" -Pattern "^prune third_party$" -Quiet)) {
             throw "MANIFEST.in must prune third_party so FFmpeg source is not published to PyPI."
           }
@@ -252,6 +259,16 @@ jobs:
         working-directory: ${{ env.PACKAGE_DIR }}
         shell: pwsh
         run: Get-ChildItem dist
+
+      - name: Upload FFmpeg build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-windows-logs-${{ matrix.arch }}
+          path: |
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/ffbuild/config.log
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/config.log
+          if-no-files-found: ignore
 
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v4
