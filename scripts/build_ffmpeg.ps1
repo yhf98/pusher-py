@@ -24,15 +24,17 @@ foreach ($tool in @("cl.exe", "link.exe", "lib.exe")) {
 }
 
 $BashCandidates = @(
-    "$env:MSYS2_ROOT\usr\bin\bash.exe",
-    "C:\msys64\usr\bin\bash.exe",
-    "C:\msys2\usr\bin\bash.exe"
-) | Where-Object { $_ -and (Test-Path $_) }
+    @(
+        "$env:MSYS2_ROOT\usr\bin\bash.exe",
+        "C:\msys64\usr\bin\bash.exe",
+        "C:\msys2\usr\bin\bash.exe"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+)
 
 if ($BashCandidates.Count -eq 0) {
     $bashCommand = Get-Command "bash.exe" -ErrorAction SilentlyContinue
     if ($bashCommand) {
-        $BashCandidates = @($bashCommand.Source)
+        $BashCandidates = @([string]$bashCommand.Source)
     }
 }
 
@@ -41,6 +43,7 @@ if ($BashCandidates.Count -eq 0) {
 }
 
 $Bash = $BashCandidates[0]
+Write-Host "Using MSYS2 bash: $Bash"
 
 switch ($Arch.ToUpperInvariant()) {
     "X86" {
