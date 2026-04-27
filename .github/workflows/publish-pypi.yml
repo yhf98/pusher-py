@@ -269,6 +269,7 @@ jobs:
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/ffbuild/config.log
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/ffbuild/config.mak
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/config.log
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/build_ffmpeg_windows.sh
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/*.dll
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/*.lib
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/*.def

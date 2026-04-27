@@ -165,7 +165,9 @@ $BuildAvformatQ = Quote-Sh "$BuildUnix/libavformat/"
 $BuildAvcodecQ = Quote-Sh "$BuildUnix/libavcodec/"
 $BuildAvutilQ = Quote-Sh "$BuildUnix/libavutil/"
 
+$BuildScript = Join-Path $BuildDir "build_ffmpeg_windows.sh"
 $ScriptLines = @(
+    "#!/usr/bin/env bash",
     "set -euo pipefail",
     "export PATH=${MsvcBinUnixQ}:`$PATH:/usr/bin",
     "mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ",
@@ -190,8 +192,18 @@ $ScriptLines = @(
     "/usr/bin/find $RootLibQ -maxdepth 1 -type f | /usr/bin/sort"
 )
 $Script = $ScriptLines -join "`n"
+[System.IO.File]::WriteAllText(
+    $BuildScript,
+    $Script + "`n",
+    [System.Text.UTF8Encoding]::new($false)
+)
+$BuildScriptUnix = Convert-ToMsysPath $BuildScript
+Write-Host "Generated FFmpeg build script: $BuildScript"
+Write-Host "----- begin build_ffmpeg_windows.sh -----"
+Write-Host $Script
+Write-Host "----- end build_ffmpeg_windows.sh -----"
 
-& $Bash -lc $Script
+& $Bash $BuildScriptUnix
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
