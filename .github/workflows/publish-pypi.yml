@@ -267,7 +267,16 @@ jobs:
           name: ffmpeg-windows-logs-${{ matrix.arch }}
           path: |
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/ffbuild/config.log
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/ffbuild/config.mak
             ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/config.log
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/*.dll
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/*.lib
+            ${{ env.PACKAGE_DIR }}/build/ffmpeg-windows/**/*.def
+            ${{ env.PACKAGE_DIR }}/.ffmpeg-prefix/windows-${{ matrix.cibw_arch }}/**/*.dll
+            ${{ env.PACKAGE_DIR }}/.ffmpeg-prefix/windows-${{ matrix.cibw_arch }}/**/*.lib
+            ${{ env.PACKAGE_DIR }}/.ffmpeg-prefix/windows-${{ matrix.cibw_arch }}/**/*.def
+            ${{ env.PACKAGE_DIR }}/lib/*.dll
+            ${{ env.PACKAGE_DIR }}/lib/*.lib
           if-no-files-found: ignore
 
       - name: Upload distribution artifacts

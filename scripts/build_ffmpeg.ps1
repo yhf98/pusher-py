@@ -34,11 +34,17 @@ if ($MissingSources.Count -gt 0) {
     throw "FFmpeg source tree is incomplete: $SourceDir. Missing required files: $MissingText. Commit the full third_party/FFmpeg source tree to GitHub, including Makefile and ffbuild/*.mak."
 }
 
+$ToolPaths = @{}
 foreach ($tool in @("cl.exe", "link.exe", "lib.exe")) {
-    if (!(Get-Command $tool -ErrorAction SilentlyContinue)) {
+    $command = Get-Command $tool -ErrorAction SilentlyContinue
+    if (!$command) {
         throw "$tool was not found. Run this script from a Visual Studio Developer shell, or use the GitHub Actions workflow."
     }
+    $ToolPaths[$tool] = $command.Source
 }
+Write-Host "Using MSVC cl.exe: $($ToolPaths['cl.exe'])"
+Write-Host "Using MSVC link.exe: $($ToolPaths['link.exe'])"
+Write-Host "Using MSVC lib.exe: $($ToolPaths['lib.exe'])"
 
 $BashCandidates = @(
     @(
@@ -90,6 +96,7 @@ $RootUnix = Convert-ToMsysPath $Root
 $SourceUnix = Convert-ToMsysPath $SourceDir
 $BuildUnix = Convert-ToMsysPath $BuildDir
 $PrefixUnix = Convert-ToMsysPath $Prefix
+$MsvcBinUnix = Convert-ToMsysPath (Split-Path -Parent $ToolPaths["cl.exe"])
 
 $RequiredUnixSources = @(
     "$SourceUnix/configure",
@@ -148,6 +155,7 @@ $env:MSYS2_PATH_TYPE = "inherit"
 
 $BuildUnixQ = Quote-Sh $BuildUnix
 $PrefixUnixQ = Quote-Sh $PrefixUnix
+$MsvcBinUnixQ = Quote-Sh $MsvcBinUnix
 $RootIncludeQ = Quote-Sh "$RootUnix/include"
 $RootLibQ = Quote-Sh "$RootUnix/lib"
 $PrefixIncludeQ = Quote-Sh "$PrefixUnix/include/"
@@ -159,10 +167,15 @@ $BuildAvutilQ = Quote-Sh "$BuildUnix/libavutil/"
 
 $ScriptLines = @(
     "set -euo pipefail",
-    "export PATH=/usr/bin:`$PATH",
+    "export PATH=${MsvcBinUnixQ}:`$PATH:/usr/bin",
     "mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ",
     "cd $BuildUnixQ",
+    "echo `"MSYS2 cl.exe: `$(command -v cl.exe || true)`"",
+    "echo `"MSYS2 link.exe: `$(command -v link.exe || true)`"",
+    "echo `"MSYS2 lib.exe: `$(command -v lib.exe || true)`"",
     "if [ ! -f config.mak ]; then $ConfigureCommand; fi",
+    "echo `"FFmpeg selected build variables:`"",
+    "/usr/bin/grep -E '^(CONFIG_SHARED|CONFIG_STATIC|CONFIG_AVFORMAT|CONFIG_AVCODEC|CONFIG_AVUTIL|CC=|LD=|AR=|SLIBNAME|SLIBNAME_WITH_MAJOR|SLIBSUF|LIBSUF|SHFLAGS=)' ffbuild/config.mak || true",
     "echo `"Using make: `$(command -v make)`"",
     "/usr/bin/make -j`$(/usr/bin/nproc) libavutil/avutil.dll libavcodec/avcodec.dll libavformat/avformat.dll",
     "/usr/bin/make install-libs install-headers",
@@ -184,11 +197,59 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $RequiredComponents = @("avformat", "avcodec", "avutil")
+
+$ArtifactRoots = @($BuildDir, $Prefix) | Where-Object { Test-Path $_ }
+Write-Host "PowerShell FFmpeg artifact scan:"
+$AllArtifacts = @()
+foreach ($ArtifactRoot in $ArtifactRoots) {
+    $Artifacts = Get-ChildItem -Path $ArtifactRoot -Recurse -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            !$_.PSIsContainer -and (
+                $_.Name.EndsWith(".dll", [StringComparison]::OrdinalIgnoreCase) -or
+                $_.Name.EndsWith(".lib", [StringComparison]::OrdinalIgnoreCase) -or
+                $_.Name.EndsWith(".def", [StringComparison]::OrdinalIgnoreCase) -or
+                $_.Name.EndsWith(".dll.a", [StringComparison]::OrdinalIgnoreCase)
+            )
+        } |
+        Sort-Object FullName
+    foreach ($Artifact in $Artifacts) {
+        Write-Host "  $($Artifact.FullName)"
+        $AllArtifacts += $Artifact
+    }
+}
+
+foreach ($Artifact in $AllArtifacts) {
+    if (
+        $Artifact.Name.EndsWith(".dll", [StringComparison]::OrdinalIgnoreCase) -or
+        $Artifact.Name.EndsWith(".lib", [StringComparison]::OrdinalIgnoreCase)
+    ) {
+        Copy-Item -Force -LiteralPath $Artifact.FullName -Destination $LibDir
+    }
+}
+
 foreach ($Component in $RequiredComponents) {
     $PlainImportLib = Join-Path $LibDir "$Component.lib"
     $PrefixedImportLib = Join-Path $LibDir "lib$Component.lib"
     if (!(Test-Path $PlainImportLib) -and (Test-Path $PrefixedImportLib)) {
         Copy-Item -Force $PrefixedImportLib $PlainImportLib
+    }
+
+    if (!(Test-Path $PlainImportLib)) {
+        $DefinitionFile = $AllArtifacts |
+            Where-Object { $_.Name -like "$Component*.def" -or $_.Name -like "lib$Component*.def" } |
+            Select-Object -First 1
+        if ($DefinitionFile) {
+            $Machine = switch ($Arch.ToUpperInvariant()) {
+                "X86" { "X86" }
+                "AMD64" { "X64" }
+                "ARM64" { "ARM64" }
+            }
+            Write-Host "Creating $Component.lib from $($DefinitionFile.FullName)"
+            & $ToolPaths["lib.exe"] /NOLOGO "/MACHINE:$Machine" "/DEF:$($DefinitionFile.FullName)" "/OUT:$PlainImportLib"
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
+        }
     }
 }
 
@@ -200,7 +261,7 @@ foreach ($Component in $RequiredComponents) {
         $MissingArtifacts += "$Component import library (.lib)"
     }
 
-    $RuntimeDlls = Get-ChildItem -Path $LibDir -Filter "*$Component*.dll" -File -ErrorAction SilentlyContinue
+    $RuntimeDlls = Get-ChildItem -Path $LibDir -Filter "*$Component*.dll" -Force -ErrorAction SilentlyContinue
     if (!$RuntimeDlls) {
         $MissingArtifacts += "$Component runtime DLL (.dll)"
     }
@@ -208,7 +269,21 @@ foreach ($Component in $RequiredComponents) {
 
 if ($MissingArtifacts.Count -gt 0) {
     Write-Host "Files found in ${LibDir}:"
-    Get-ChildItem -Path $LibDir -File -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Write-Host "  $($_.Name)" }
+    Get-ChildItem -Path $LibDir -Force -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Write-Host "  $($_.Name)" }
+    foreach ($ArtifactRoot in $ArtifactRoots) {
+        Write-Host "Files found under ${ArtifactRoot}:"
+        Get-ChildItem -Path $ArtifactRoot -Recurse -Force -ErrorAction SilentlyContinue |
+            Sort-Object FullName |
+            Select-Object -First 300 |
+            ForEach-Object { Write-Host "  $($_.FullName)" }
+    }
+    $ConfigMak = Join-Path $BuildDir "ffbuild\config.mak"
+    if (Test-Path $ConfigMak) {
+        Write-Host "ffbuild/config.mak relevant lines:"
+        Get-Content $ConfigMak |
+            Select-String -Pattern "^(CONFIG_SHARED|CONFIG_STATIC|CONFIG_AVFORMAT|CONFIG_AVCODEC|CONFIG_AVUTIL|CC=|LD=|AR=|SLIBNAME|SLIBNAME_WITH_MAJOR|SLIBSUF|LIBSUF|SHFLAGS=)" |
+            ForEach-Object { Write-Host "  $($_.Line)" }
+    }
     $MissingText = $MissingArtifacts -join ", "
     throw "FFmpeg Windows SDK build is incomplete. Missing: $MissingText"
 }
