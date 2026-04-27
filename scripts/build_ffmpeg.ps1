@@ -156,14 +156,16 @@ $PrefixBinQ = Quote-Sh "$PrefixUnix/bin/"
 
 $ScriptLines = @(
     "set -euo pipefail",
+    "export PATH=/usr/bin:`$PATH",
     "mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ",
     "cd $BuildUnixQ",
     "if [ ! -f config.mak ]; then $ConfigureCommand; fi",
-    "make -j`$(nproc)",
-    "make install",
-    "cp -a ${PrefixIncludeQ}* $RootIncludeQ",
-    "cp -a ${PrefixLibQ}*.lib $RootLibQ",
-    "cp -a ${PrefixBinQ}*.dll $RootLibQ"
+    "echo `"Using make: `$(command -v make)`"",
+    "/usr/bin/make -j`$(/usr/bin/nproc)",
+    "/usr/bin/make install",
+    "/usr/bin/cp -a ${PrefixIncludeQ}* $RootIncludeQ",
+    "/usr/bin/cp -a ${PrefixLibQ}*.lib $RootLibQ",
+    "/usr/bin/cp -a ${PrefixBinQ}*.dll $RootLibQ"
 )
 $Script = $ScriptLines -join "`n"
 
