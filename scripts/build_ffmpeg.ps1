@@ -153,6 +153,9 @@ $RootLibQ = Quote-Sh "$RootUnix/lib"
 $PrefixIncludeQ = Quote-Sh "$PrefixUnix/include/"
 $PrefixLibQ = Quote-Sh "$PrefixUnix/lib/"
 $PrefixBinQ = Quote-Sh "$PrefixUnix/bin/"
+$BuildAvformatQ = Quote-Sh "$BuildUnix/libavformat/"
+$BuildAvcodecQ = Quote-Sh "$BuildUnix/libavcodec/"
+$BuildAvutilQ = Quote-Sh "$BuildUnix/libavutil/"
 
 $ScriptLines = @(
     "set -euo pipefail",
@@ -161,10 +164,15 @@ $ScriptLines = @(
     "cd $BuildUnixQ",
     "if [ ! -f config.mak ]; then $ConfigureCommand; fi",
     "echo `"Using make: `$(command -v make)`"",
-    "/usr/bin/make -j`$(/usr/bin/nproc)",
-    "/usr/bin/make install",
+    "/usr/bin/make -j`$(/usr/bin/nproc) libavutil/avutil.dll libavcodec/avcodec.dll libavformat/avformat.dll",
+    "/usr/bin/make install-libs install-headers",
+    "echo `"Windows FFmpeg build-tree artifacts:`"",
+    "/usr/bin/find . -maxdepth 3 -type f \( -name '*.dll' -o -name '*.lib' -o -name '*.def' -o -name '*.dll.a' \) -print | /usr/bin/sort",
+    "echo `"Windows FFmpeg prefix artifacts:`"",
+    "/usr/bin/find $PrefixUnixQ -maxdepth 4 -type f \( -name '*.dll' -o -name '*.lib' -o -name '*.def' -o -name '*.dll.a' \) -print | /usr/bin/sort",
     "/usr/bin/cp -a ${PrefixIncludeQ}* $RootIncludeQ",
-    "for pattern in ${PrefixLibQ}*.lib ${PrefixBinQ}*.lib ${PrefixBinQ}*.dll; do if [ -e `"`$pattern`" ]; then /usr/bin/cp -a `"`$pattern`" $RootLibQ; fi; done",
+    "for pattern in ${PrefixLibQ}*.lib ${PrefixBinQ}*.lib ${PrefixBinQ}*.dll ${BuildAvformatQ}*.lib ${BuildAvformatQ}*.dll ${BuildAvcodecQ}*.lib ${BuildAvcodecQ}*.dll ${BuildAvutilQ}*.lib ${BuildAvutilQ}*.dll; do if [ -e `"`$pattern`" ]; then /usr/bin/cp -a `"`$pattern`" $RootLibQ; fi; done",
+    "/usr/bin/find $PrefixUnixQ $BuildUnixQ -maxdepth 4 -type f \( -name '*.dll' -o -name '*.lib' \) -exec /usr/bin/cp -a {} $RootLibQ \;",
     "echo `"Windows FFmpeg SDK lib directory:`"",
     "/usr/bin/find $RootLibQ -maxdepth 1 -type f | /usr/bin/sort"
 )
