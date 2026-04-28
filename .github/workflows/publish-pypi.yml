@@ -219,6 +219,7 @@ jobs:
           CIBW_SKIP: "cp31?t-* pp*"
           CIBW_TEST_SKIP: "*-win_arm64"
           CIBW_BEFORE_BUILD_WINDOWS: >
+            python -m pip install --upgrade delvewheel &&
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_ffmpeg.ps1 -Arch ${{ matrix.cibw_arch }}
           CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
             python -m delvewheel repair --add-path "${{ github.workspace }}\lib" -w {dest_dir} {wheel}
