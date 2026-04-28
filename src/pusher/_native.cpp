@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr const char *kVersion = "0.1.0";
+constexpr const char *kVersion = "0.1.8";
 
 #define PUSHER_METHOD_CAST(func) \
     reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)(void)>(func))

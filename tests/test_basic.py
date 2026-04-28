@@ -6,7 +6,7 @@ from pusher import Pusher, build_output_url, detect_protocol, version
 
 
 def test_version() -> None:
-    assert version() == "0.1.0"
+    assert version() == "0.1.8"
 
 
 @pytest.mark.parametrize(

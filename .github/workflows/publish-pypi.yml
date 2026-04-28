@@ -302,7 +302,6 @@ jobs:
       url: https://test.pypi.org/project/pusher-py/
     permissions:
       contents: read
-      id-token: write
 
     steps:
       - name: Download distribution artifacts
@@ -316,6 +315,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
 
   publish-pypi:
     name: Publish to PyPI
@@ -329,7 +329,6 @@ jobs:
       url: https://pypi.org/project/pusher-py/
     permissions:
       contents: read
-      id-token: write
 
     steps:
       - name: Download distribution artifacts
@@ -341,3 +340,5 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}

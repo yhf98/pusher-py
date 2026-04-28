@@ -191,7 +191,7 @@ with Pusher(engine="libav", loop=False, realtime=False) as p:
 返回 native 扩展版本。
 
 ```python
-assert version() == "0.1.0"
+assert version() == "0.1.8"
 ```
 
 返回值：`str`。
