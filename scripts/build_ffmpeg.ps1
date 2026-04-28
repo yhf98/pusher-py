@@ -68,6 +68,21 @@ if ($BashCandidates.Count -eq 0) {
 $Bash = $BashCandidates[0]
 Write-Host "Using MSYS2 bash: $Bash"
 
+$MsysUsrBin = Split-Path -Parent $Bash
+$MsysMake = Join-Path $MsysUsrBin "make.exe"
+$MsysPacman = Join-Path $MsysUsrBin "pacman.exe"
+if (!(Test-Path $MsysMake) -and (Test-Path $MsysPacman)) {
+    Write-Host "MSYS make.exe not found at $MsysMake. Installing MSYS package: make"
+    & $Bash -lc "pacman -S --needed --noconfirm make"
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+if (!(Test-Path $MsysMake)) {
+    throw "MSYS make.exe was not found at $MsysMake. Install the MSYS2 'make' package, not the MinGW make package."
+}
+Write-Host "Using MSYS make.exe: $MsysMake"
+
 switch ($Arch.ToUpperInvariant()) {
     "X86" {
         $FfmpegArch = "x86"
@@ -97,6 +112,7 @@ $SourceUnix = Convert-ToMsysPath $SourceDir
 $BuildUnix = Convert-ToMsysPath $BuildDir
 $PrefixUnix = Convert-ToMsysPath $Prefix
 $MsvcBinUnix = Convert-ToMsysPath (Split-Path -Parent $ToolPaths["cl.exe"])
+$MsysMakeUnix = Convert-ToMsysPath $MsysMake
 
 $RequiredUnixSources = @(
     "$SourceUnix/configure",
@@ -156,6 +172,7 @@ $env:MSYS2_PATH_TYPE = "inherit"
 $BuildUnixQ = Quote-Sh $BuildUnix
 $PrefixUnixQ = Quote-Sh $PrefixUnix
 $MsvcBinUnixQ = Quote-Sh $MsvcBinUnix
+$MsysMakeUnixQ = Quote-Sh $MsysMakeUnix
 $RootIncludeQ = Quote-Sh "$RootUnix/include"
 $RootLibQ = Quote-Sh "$RootUnix/lib"
 $PrefixIncludeQ = Quote-Sh "$PrefixUnix/include/"
@@ -169,7 +186,9 @@ $BuildScript = Join-Path $BuildDir "build_ffmpeg_windows.sh"
 $ScriptLines = @(
     "#!/usr/bin/env bash",
     "set -euo pipefail",
-    "export PATH=${MsvcBinUnixQ}:`$PATH:/usr/bin",
+    "export MSYSTEM=MSYS",
+    "export CHERE_INVOKING=1",
+    "export PATH=${MsvcBinUnixQ}:/usr/bin:`$PATH",
     "mkdir -p $BuildUnixQ $PrefixUnixQ $RootIncludeQ $RootLibQ",
     "cd $BuildUnixQ",
     "echo `"MSYS2 cl.exe: `$(command -v cl.exe || true)`"",
@@ -178,8 +197,8 @@ $ScriptLines = @(
     "if [ ! -f config.mak ]; then $ConfigureCommand; fi",
     "echo `"FFmpeg selected build variables:`"",
     "/usr/bin/grep -E '^(CONFIG_SHARED|CONFIG_STATIC|CONFIG_AVFORMAT|CONFIG_AVCODEC|CONFIG_AVUTIL|CC=|LD=|AR=|SLIBNAME|SLIBNAME_WITH_MAJOR|SLIBSUF|LIBSUF|SHFLAGS=)' ffbuild/config.mak || true",
-    "if [ -x /usr/bin/make ]; then MAKE_BIN=/usr/bin/make; else MAKE_BIN=`$(command -v make || true); fi",
-    "if [ -z `"`$MAKE_BIN`" ]; then echo `"make was not found in PATH`" >&2; exit 1; fi",
+    "MAKE_BIN=$MsysMakeUnixQ",
+    "if [ ! -x `"`$MAKE_BIN`" ]; then echo `"MSYS make was not found or is not executable: `$MAKE_BIN`" >&2; exit 1; fi",
     "case `"`$MAKE_BIN`" in */mingw*/bin/make) echo `"Refusing MinGW make for FFmpeg MSVC build: `$MAKE_BIN`" >&2; echo `"Install MSYS make, usually from the MSYS2 base-devel package.`" >&2; exit 1 ;; esac",
     "if command -v nproc >/dev/null 2>&1; then JOBS=`$(nproc); else JOBS=2; fi",
     "echo `"Using make: `$MAKE_BIN`"",
