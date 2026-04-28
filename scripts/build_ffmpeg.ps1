@@ -42,6 +42,20 @@ foreach ($tool in @("cl.exe", "link.exe", "lib.exe")) {
     }
     $ToolPaths[$tool] = $command.Source
 }
+
+if ($Arch.ToUpperInvariant() -eq "X86" -and $ToolPaths["cl.exe"] -match "\\bin\\HostX86\\x86\\cl\.exe$") {
+    $HostX64X86Bin = $ToolPaths["cl.exe"] -replace "\\bin\\HostX86\\x86\\cl\.exe$", "\bin\HostX64\x86"
+    $HostX64X86Cl = Join-Path $HostX64X86Bin "cl.exe"
+    $HostX64X86Link = Join-Path $HostX64X86Bin "link.exe"
+    $HostX64X86Lib = Join-Path $HostX64X86Bin "lib.exe"
+    if ((Test-Path $HostX64X86Cl) -and (Test-Path $HostX64X86Link) -and (Test-Path $HostX64X86Lib)) {
+        Write-Host "Switching Windows x86 FFmpeg build to 64-bit-hosted MSVC tools to avoid HostX86 compiler ICE."
+        $ToolPaths["cl.exe"] = $HostX64X86Cl
+        $ToolPaths["link.exe"] = $HostX64X86Link
+        $ToolPaths["lib.exe"] = $HostX64X86Lib
+    }
+}
+
 Write-Host "Using MSVC cl.exe: $($ToolPaths['cl.exe'])"
 Write-Host "Using MSVC link.exe: $($ToolPaths['link.exe'])"
 Write-Host "Using MSVC lib.exe: $($ToolPaths['lib.exe'])"
@@ -155,10 +169,12 @@ $ConfigureArgs = @(
     "--enable-avutil",
     "--enable-protocol=file,pipe,tcp,udp,rtmp,rtmpt,rtsp,http,rtp",
     "--enable-demuxer=mov,mp4,m4a,3gp,3g2,mj2,flv,rtsp,rtp,mpegts,h264,hevc,aac,matroska",
-    "--enable-muxer=flv,rtsp,rtp,mpegts,mp4,null",
+    "--enable-muxer=flv,rtsp,rtp,mpegts,null",
     "--enable-parser=h264,hevc,aac,mpeg4video",
     "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc"
 )
+
+$BuildJobs = if ($Arch.ToUpperInvariant() -in @("X86", "ARM64")) { 2 } else { 0 }
 
 if ($Arch.ToUpperInvariant() -eq "ARM64") {
     $ConfigureArgs += "--enable-cross-compile"
@@ -181,6 +197,7 @@ $PrefixBinQ = Quote-Sh "$PrefixUnix/bin/"
 $BuildAvformatQ = Quote-Sh "$BuildUnix/libavformat/"
 $BuildAvcodecQ = Quote-Sh "$BuildUnix/libavcodec/"
 $BuildAvutilQ = Quote-Sh "$BuildUnix/libavutil/"
+$BuildJobsQ = Quote-Sh ([string]$BuildJobs)
 
 $BuildScript = Join-Path $BuildDir "build_ffmpeg_windows.sh"
 $ScriptLines = @(
@@ -200,7 +217,8 @@ $ScriptLines = @(
     "MAKE_BIN=$MsysMakeUnixQ",
     "if [ ! -x `"`$MAKE_BIN`" ]; then echo `"MSYS make was not found or is not executable: `$MAKE_BIN`" >&2; exit 1; fi",
     "case `"`$MAKE_BIN`" in */mingw*/bin/make) echo `"Refusing MinGW make for FFmpeg MSVC build: `$MAKE_BIN`" >&2; echo `"Install MSYS make, usually from the MSYS2 base-devel package.`" >&2; exit 1 ;; esac",
-    "if command -v nproc >/dev/null 2>&1; then JOBS=`$(nproc); else JOBS=2; fi",
+    "MAX_JOBS=$BuildJobsQ",
+    "if [ `"`$MAX_JOBS`" != `"0`" ]; then JOBS=`"`$MAX_JOBS`"; elif command -v nproc >/dev/null 2>&1; then JOBS=`$(nproc); else JOBS=2; fi",
     "echo `"Using make: `$MAKE_BIN`"",
     "`"`$MAKE_BIN`" -j`"`$JOBS`" libavutil/avutil.dll libavcodec/avcodec.dll libavformat/avformat.dll",
     "`"`$MAKE_BIN`" install-libs install-headers",

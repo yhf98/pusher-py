@@ -155,7 +155,7 @@ jobs:
         include:
           - arch: x86
             cibw_arch: x86
-            vc_arch: x86
+            vc_arch: amd64_x86
           - arch: x64
             cibw_arch: AMD64
             vc_arch: x64
