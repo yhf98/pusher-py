@@ -101,14 +101,87 @@ switch ($Arch.ToUpperInvariant()) {
     "X86" {
         $FfmpegArch = "x86"
         $TargetOs = "win32"
+        $VCRedistArch = "x86"
     }
     "AMD64" {
         $FfmpegArch = "x86_64"
         $TargetOs = "win64"
+        $VCRedistArch = "x64"
     }
     "ARM64" {
         $FfmpegArch = "aarch64"
         $TargetOs = "win64"
+        $VCRedistArch = "arm64"
+    }
+}
+
+function Find-VCRuntimeDir([string]$RedistArch) {
+    $CandidateRoots = @()
+
+    if ($env:VCToolsRedistDir) {
+        $CandidateRoots += $env:VCToolsRedistDir
+    }
+
+    $ClPath = $ToolPaths["cl.exe"]
+    $ClMatch = [regex]::Match($ClPath, "^(.*\\Microsoft Visual Studio\\[^\\]+\\[^\\]+\\VC)\\Tools\\MSVC\\")
+    if ($ClMatch.Success) {
+        $CandidateRoots += (Join-Path $ClMatch.Groups[1].Value "Redist\MSVC")
+    }
+
+    foreach ($VsEdition in @("Enterprise", "Professional", "Community", "BuildTools")) {
+        if ($env:ProgramFiles) {
+            $CandidateRoots += (Join-Path $env:ProgramFiles "Microsoft Visual Studio\2022\$VsEdition\VC\Redist\MSVC")
+        }
+        if (${env:ProgramFiles(x86)}) {
+            $CandidateRoots += (Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\2022\$VsEdition\VC\Redist\MSVC")
+        }
+    }
+
+    foreach ($Root in ($CandidateRoots | Where-Object { $_ } | Select-Object -Unique)) {
+        if (!(Test-Path $Root)) {
+            continue
+        }
+
+        $Direct = Join-Path $Root "$RedistArch\Microsoft.VC143.CRT"
+        if (Test-Path (Join-Path $Direct "msvcp140.dll")) {
+            return $Direct
+        }
+
+        $VersionedDirs = Get-ChildItem -LiteralPath $Root -Directory -Force -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending
+        foreach ($VersionedDir in $VersionedDirs) {
+            $Candidate = Join-Path $VersionedDir.FullName "$RedistArch\Microsoft.VC143.CRT"
+            if (Test-Path (Join-Path $Candidate "msvcp140.dll")) {
+                return $Candidate
+            }
+        }
+    }
+
+    return $null
+}
+
+function Copy-VCRuntimeDlls([string]$RedistArch, [string]$DestinationDir) {
+    $RuntimeDir = Find-VCRuntimeDir $RedistArch
+    if (!$RuntimeDir) {
+        throw "MSVC runtime redist directory was not found for $RedistArch. Expected Microsoft.VC143.CRT with msvcp140.dll."
+    }
+
+    Write-Host "Using MSVC runtime redist: $RuntimeDir"
+    $RuntimeDlls = Get-ChildItem -LiteralPath $RuntimeDir -File -Force -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -like "msvcp140*.dll" -or
+            $_.Name -like "vcruntime140*.dll" -or
+            $_.Name -ieq "concrt140.dll"
+        } |
+        Sort-Object Name
+
+    if (!$RuntimeDlls) {
+        throw "No MSVC runtime DLLs found in $RuntimeDir"
+    }
+
+    foreach ($RuntimeDll in $RuntimeDlls) {
+        Write-Host "Copying MSVC runtime DLL: $($RuntimeDll.Name)"
+        Copy-Item -Force -LiteralPath $RuntimeDll.FullName -Destination $DestinationDir
     }
 }
 
@@ -305,6 +378,8 @@ foreach ($Component in $RequiredComponents) {
         }
     }
 }
+
+Copy-VCRuntimeDlls -RedistArch $VCRedistArch -DestinationDir $LibDir
 
 $MissingArtifacts = @()
 foreach ($Component in $RequiredComponents) {
