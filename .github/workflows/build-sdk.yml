@@ -1,0 +1,217 @@
+name: Build Native SDK
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-sdk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-linux-sdk:
+    name: Build Linux SDK (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            platform: linux/386
+            image: quay.io/pypa/manylinux2014_i686
+            artifact: linux-x86
+            qemu: true
+          - arch: x64
+            platform: linux/amd64
+            image: quay.io/pypa/manylinux2014_x86_64
+            artifact: linux-x86_64
+            qemu: false
+          - arch: aarch64
+            platform: linux/arm64
+            image: quay.io/pypa/manylinux2014_aarch64
+            artifact: linux-aarch64
+            qemu: true
+          - arch: armv7l
+            platform: linux/arm/v7
+            image: quay.io/pypa/manylinux_2_31_armv7l
+            artifact: linux-armv7l
+            qemu: true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up QEMU
+        if: matrix.qemu
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Verify required files
+        run: |
+          test -f CMakeLists.txt
+          test -f include/pusher/pusher_c.h
+          test -f include/pusher/pusher.hpp
+          test -f scripts/package_sdk.sh
+          python3 scripts/check_ffmpeg_source.py
+
+      - name: Build and package SDK
+        run: |
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -v "${{ github.workspace }}:/project" \
+            -w /project \
+            "${{ matrix.image }}" \
+            /bin/bash -lc '
+              set -euxo pipefail
+              if ! command -v cmake >/dev/null 2>&1; then
+                for python_bin in /opt/python/cp312-*/bin/python /opt/python/cp311-*/bin/python /usr/bin/python3; do
+                  if [ -x "$python_bin" ]; then
+                    "$python_bin" -m pip install --upgrade cmake
+                    export PATH="$(dirname "$python_bin"):$PATH"
+                    break
+                  fi
+                done
+              fi
+              command -v cmake
+              bash scripts/build_ffmpeg.sh
+              cmake -S . -B build/sdk -DCMAKE_BUILD_TYPE=Release -DPUSHER_BUILD_EXAMPLES=ON -DPUSHER_WHIP=OFF
+              cmake --build build/sdk -j"$(nproc)"
+              build/sdk/pusher_c_demo sample.mp4 rtmp://127.0.0.1:1935/live/test
+              bash scripts/package_sdk.sh "${{ matrix.artifact }}"
+              chmod -R a+rX build dist-sdk include lib
+            '
+
+      - name: Upload SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-${{ matrix.artifact }}
+          path: dist-sdk/pusher-sdk-*.tar.gz
+          if-no-files-found: error
+
+      - name: Upload FFmpeg build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-ffmpeg-linux-logs-${{ matrix.artifact }}
+          path: |
+            build/ffmpeg/ffbuild/config.log
+            build/ffmpeg/config.log
+          if-no-files-found: ignore
+
+  build-windows-sdk:
+    name: Build Windows SDK (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            ffmpeg_arch: x86
+            cmake_arch: Win32
+            vc_arch: amd64_x86
+            artifact: windows-x86
+            can_run: true
+          - arch: x64
+            ffmpeg_arch: AMD64
+            cmake_arch: x64
+            vc_arch: x64
+            artifact: windows-x64
+            can_run: true
+          - arch: arm64
+            ffmpeg_arch: ARM64
+            cmake_arch: ARM64
+            vc_arch: amd64_arm64
+            artifact: windows-arm64
+            can_run: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.vc_arch }}
+
+      - name: Set up MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MSYS
+          update: true
+          path-type: inherit
+          install: make diffutils
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify required files
+        shell: pwsh
+        run: |
+          foreach ($path in @("CMakeLists.txt", "include/pusher/pusher_c.h", "include/pusher/pusher.hpp", "scripts/package_sdk.ps1", "scripts/build_ffmpeg.ps1")) {
+            if (!(Test-Path $path)) { throw "missing required file: $path" }
+          }
+          python scripts/check_ffmpeg_source.py
+
+      - name: Build FFmpeg SDK
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_ffmpeg.ps1 -Arch ${{ matrix.ffmpeg_arch }}
+
+      - name: Build native SDK
+        shell: pwsh
+        run: |
+          cmake -S . -B build\sdk -G "Visual Studio 17 2022" -A ${{ matrix.cmake_arch }} -DPUSHER_BUILD_EXAMPLES=ON -DPUSHER_WHIP=OFF
+          cmake --build build\sdk --config Release --parallel
+
+      - name: Smoke test demo
+        if: matrix.can_run
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\lib;$PWD\build\sdk\Release;$env:PATH"
+          & ".\build\sdk\Release\pusher_c_demo.exe" sample.mp4 rtmp://127.0.0.1:1935/live/test
+
+      - name: Package SDK
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_sdk.ps1 -Platform ${{ matrix.artifact }} -BuildDir build\sdk -Config Release
+
+      - name: Upload SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-${{ matrix.artifact }}
+          path: dist-sdk/pusher-sdk-*.zip
+          if-no-files-found: error
+
+      - name: Upload FFmpeg build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-sdk-ffmpeg-windows-logs-${{ matrix.artifact }}
+          path: |
+            build/ffmpeg-windows/**/ffbuild/config.log
+            build/ffmpeg-windows/**/ffbuild/config.mak
+            build/ffmpeg-windows/**/config.log
+            build/ffmpeg-windows/**/build_ffmpeg_windows.sh
+            build/ffmpeg-windows/**/*.dll
+            build/ffmpeg-windows/**/*.lib
+            build/ffmpeg-windows/**/*.def
+            .ffmpeg-prefix/windows-${{ matrix.ffmpeg_arch }}/**/*.dll
+            .ffmpeg-prefix/windows-${{ matrix.ffmpeg_arch }}/**/*.lib
+            .ffmpeg-prefix/windows-${{ matrix.ffmpeg_arch }}/**/*.def
+            lib/*.dll
+            lib/*.lib
+          if-no-files-found: ignore

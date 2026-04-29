@@ -15,6 +15,7 @@ REQUIRED_FILES = [
     "libavcodec/Makefile",
     "libavutil/Makefile",
     "libavdevice/Makefile",
+    "libavfilter/Makefile",
     "libswscale/Makefile",
     "libswresample/Makefile",
 ]
@@ -26,6 +27,7 @@ REQUIRED_DIRS = [
     "libavcodec",
     "libavutil",
     "libavdevice",
+    "libavfilter",
     "libswscale",
     "libswresample",
 ]

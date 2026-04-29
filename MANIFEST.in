@@ -1,5 +1,6 @@
 include README.md
 include SDK_API.md
+include CMakeLists.txt
 include pyproject.toml
 include setup.py
 include MANIFEST.in
@@ -7,6 +8,7 @@ recursive-include include *.h *.hpp
 recursive-include src/pusher *.c *.cpp *.py py.typed
 recursive-include scripts *.py *.sh *.ps1
 recursive-include examples *.py
+recursive-include examples *.c *.cpp
 recursive-include tests *.py
 prune third_party
 prune lib

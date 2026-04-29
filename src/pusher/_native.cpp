@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include "pusher/pusher.hpp"
+#include "pusher/version.h"
 #include "pusher/url_utils.h"
 
 #include <exception>
@@ -11,7 +12,7 @@
 
 namespace {
 
-constexpr const char *kVersion = "0.1.9";
+constexpr const char *kVersion = PUSHER_VERSION;
 
 #define PUSHER_METHOD_CAST(func) \
     reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)(void)>(func))

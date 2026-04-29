@@ -20,6 +20,7 @@ required_sources=(
   "libavcodec/Makefile"
   "libavutil/Makefile"
   "libavdevice/Makefile"
+  "libavfilter/Makefile"
   "libswscale/Makefile"
   "libswresample/Makefile"
 )
@@ -59,6 +60,7 @@ if [[ ! -f config.mak ]]; then
     --disable-asm \
     --disable-x86asm \
     --enable-avdevice \
+    --enable-avfilter \
     --enable-swscale \
     --enable-swresample \
     --enable-network \
@@ -66,6 +68,7 @@ if [[ ! -f config.mak ]]; then
     --enable-avformat \
     --enable-avcodec \
     --enable-avutil \
+    --enable-avfilter \
     --enable-swscale \
     --enable-swresample \
     --enable-avdevice \

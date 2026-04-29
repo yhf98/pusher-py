@@ -10,6 +10,8 @@
 #include <thread>
 #include <vector>
 
+#include "pusher/export.h"
+
 namespace pusher {
 
 struct WorkerState;
@@ -30,7 +32,7 @@ struct PusherConfig {
     long long probesize = 50000000;
 };
 
-class NativePusher {
+class PUSHER_API NativePusher {
 public:
     explicit NativePusher(PusherConfig config);
     ~NativePusher();
@@ -76,13 +78,13 @@ private:
     std::thread worker_thread_;
 };
 
-std::string build_output_url(const std::string &protocol,
-                             const std::string &host,
-                             const std::string &app,
-                             const std::string &stream,
-                             const std::string &secret,
-                             int port,
-                             bool use_tls);
+PUSHER_API std::string build_output_url(const std::string &protocol,
+                                        const std::string &host,
+                                        const std::string &app,
+                                        const std::string &stream,
+                                        const std::string &secret,
+                                        int port,
+                                        bool use_tls);
 
 }  // namespace pusher
 

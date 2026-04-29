@@ -35,6 +35,8 @@ extern "C" {
 namespace pusher {
 namespace {
 
+#ifdef PUSHER_ENABLE_WHIP
+
 static bool starts_with(const std::string &value, const std::string &prefix) {
     return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
 }
@@ -91,8 +93,6 @@ static std::vector<uint8_t> extract_sps_pps_from_extradata(const uint8_t *extra,
 
     return result;
 }
-
-#ifdef PUSHER_ENABLE_WHIP
 
 struct HttpResponse {
     long http_code = 0;

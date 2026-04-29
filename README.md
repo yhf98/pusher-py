@@ -1,8 +1,8 @@
 # pusher
 
-`pusher` 是一个基于 FFmpeg SDK 二次开发的 Python C/C++ 原生推流/转推插件。它直接链接本项目内的 `include/` 与 `lib/`，在当前 Python 进程内启动 C++ worker 线程完成工作，不需要为每路流启动一个 `ffmpeg` 命令进程。
+`pusher` 是一个基于 FFmpeg SDK 二次开发的 Python C/C++ 原生推流/转推 SDK。它直接链接本项目内的 `include/` 与 `lib/`，在当前进程内启动 C++ worker 线程完成工作，不需要为每路流启动一个 `ffmpeg` 命令进程。
 
-完整 SDK 方法、参数、默认值、环境变量和 CLI 说明见 [SDK_API.md](SDK_API.md)。
+完整 Python、C/C++ SDK 方法、参数、默认值、环境变量和 CLI 说明见 [SDK_API.md](SDK_API.md)。
 
 它适合 `-c copy` 这类复制转推场景，例如：
 
@@ -42,11 +42,15 @@ pusher-py/
 ├── src/pusher/
 │   ├── _native.cpp          # CPython C API 绑定层
 │   ├── pusher.cpp           # libav 转推和 worker 生命周期
+│   ├── pusher_c.cpp         # C ABI，供 C/跨语言 FFI 调用
 │   ├── stream_push/whip.cpp # 内嵌 WHIP/WebRTC 推流实现
 │   ├── url_utils.c          # 协议识别
 │   ├── cli.py               # 命令行工具
 │   └── __init__.py
 ├── examples/basic_usage.py
+├── examples/c_demo.c
+├── examples/cpp_demo.cpp
+├── CMakeLists.txt           # C/C++ SDK 动态库和 demo 构建
 ├── lib/                     # FFmpeg 动态库
 ├── scripts/build_ffmpeg.sh  # 从源码自动编译 FFmpeg SDK
 ├── third_party/FFmpeg/      # 内置 FFmpeg 源码
@@ -78,13 +82,27 @@ PyPI 发布包不包含 `third_party/FFmpeg` 全量源码，也不包含本机�
 
 构建脚本不会读取 `/usr/local/ffmpeg`，也不要求用户提前安装或编译 FFmpeg。
 
-自动编译采用精简 FFmpeg SDK 配置，主要启用 `avformat`、`avcodec`、`avdevice`、`avutil`、`swscale`、`swresample`，以及 RTSP/RTMP/RTP/HTTP/TCP/UDP/文件协议、摄像头输入和常见 muxer/demuxer。目标是 native 推流/转推，不包含 ffmpeg/ffprobe 命令行程序。
+自动编译采用精简 FFmpeg SDK 配置，主要启用 `avformat`、`avcodec`、`avdevice`、`avfilter`、`avutil`、`swscale`、`swresample`，以及 RTSP/RTMP/RTP/HTTP/TCP/UDP/文件协议、摄像头输入和常见 muxer/demuxer。目标是 native 推流/转推，不包含 ffmpeg/ffprobe 命令行程序。
 
 ## CI 发布平台
 
 GitHub Actions 会从仓库内的 `third_party/FFmpeg` 自动构建 FFmpeg SDK，再构建 Python wheel。PyPI wheel 不包含 `third_party/FFmpeg` 源码；Linux wheel 会携带运行所需的 FFmpeg `.so` 动态库。
 
 当前自动发布目标是 Linux `x86_64`、`aarch64`、`armv7l`，以及 Windows `x86`、`x64`、`ARM64`。Linux 使用 `scripts/build_ffmpeg.sh`，Windows 使用 MSVC + MSYS2 执行 `scripts/build_ffmpeg.ps1` 并产出 `.lib`/`.dll` SDK。RK 系列、树莓派、香橙派等开发板通常使用 `aarch64` 64 位系统或 `armv7l` 32 位系统；板载硬编解码能力需要单独的设备镜像/系统库适配，不包含在通用 PyPI wheel 中。
+
+独立 C/C++ 动态库由 `.github/workflows/build-sdk.yml` 构建，只上传 GitHub Actions artifacts，不发布到 PyPI，不影响 Python wheel。当前 SDK artifacts：
+
+| Artifact | 目标 |
+| --- | --- |
+| `native-sdk-linux-x86` | Linux 32 位 x86 |
+| `native-sdk-linux-x86_64` | Linux 64 位 x86 |
+| `native-sdk-linux-aarch64` | Linux 64 位 ARM，适合常见 RK/树莓派/香橙派 64 位系统 |
+| `native-sdk-linux-armv7l` | Linux 32 位 ARM，适合 armv7/armhf 系统 |
+| `native-sdk-windows-x86` | Windows 32 位 x86 |
+| `native-sdk-windows-x64` | Windows 64 位 x86 |
+| `native-sdk-windows-arm64` | Windows ARM64 |
+
+SDK artifact 内包含 `include/pusher`、`libpusher`/`pusher.dll`、FFmpeg 运行库、C/C++ demo 和文档。通用 SDK CI 默认使用 `PUSHER_WHIP=OFF`，保证 RTMP/RTSP/SRT/RTP 和摄像头 H264 路径可跨架构构建；WHIP/WebRTC 需要目标平台额外提供 `libcurl` 和 `libdatachannel`，可在自有环境用 `PUSHER_WHIP=ON` 单独构建。
 
 ## 安装与构建
 
@@ -104,6 +122,90 @@ python -m pip install -e ".[dev]"
 
 ```bash
 PYTHONPATH=src python -c "from pusher import Pusher; print(Pusher)"
+```
+
+## C/C++ SDK 构建
+
+C/C++ 第三方库和 Python 扩展共用同一套 native 实现。公共头文件在 `include/pusher/`：
+
+- `pusher/pusher_c.h`：稳定 C ABI，适合 C 项目和跨语言 FFI。
+- `pusher/pusher.hpp`：C++17 API，直接使用 `pusher::NativePusher`。
+- `pusher/url_utils.h`：输出协议识别。
+
+Linux x86_64、aarch64、armv7l 以及 RK、树莓派、香橙派等常见开发板推荐用 CMake 构建动态库：
+
+```bash
+cd /root/workspace/ms-fish-recg-pro/pusher-py
+bash scripts/build_ffmpeg.sh
+cmake -S . -B build/sdk -DPUSHER_BUILD_EXAMPLES=ON -DPUSHER_WHIP=AUTO
+cmake --build build/sdk -j
+```
+
+产物：
+
+```text
+build/sdk/libpusher.so
+build/sdk/pusher_c_demo
+build/sdk/pusher_cpp_demo
+```
+
+Windows x86/x64/ARM64 使用 Visual Studio Developer Shell，先构建 FFmpeg SDK，再构建 DLL：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build_ffmpeg.ps1 -Arch AMD64
+cmake -S . -B build\sdk -G "Visual Studio 17 2022" -A x64 -DPUSHER_BUILD_EXAMPLES=ON -DPUSHER_WHIP=OFF
+cmake --build build\sdk --config Release
+```
+
+架构对应关系：
+
+| 平台 | CMake/脚本参数 |
+| --- | --- |
+| Windows x86 | `-Arch x86`，CMake `-A Win32` |
+| Windows x64 | `-Arch AMD64`，CMake `-A x64` |
+| Windows ARM64 | `-Arch ARM64`，CMake `-A ARM64` |
+| Linux x86_64 | 本机 CMake 构建 |
+| Linux aarch64 | 本机板端构建，或交叉工具链文件 |
+| Linux armv7l | 本机板端构建，或交叉工具链文件 |
+
+交叉编译时传入工具链文件和目标 SDK 路径：
+
+```bash
+cmake -S . -B build/aarch64 \
+  -DCMAKE_TOOLCHAIN_FILE=/path/to/aarch64-toolchain.cmake \
+  -DPUSHER_SDK_INCLUDE_DIR=/path/to/target/include \
+  -DPUSHER_SDK_LIB_DIR=/path/to/target/lib \
+  -DPUSHER_WHIP=OFF
+cmake --build build/aarch64 -j
+```
+
+`PUSHER_WHIP=ON` 需要目标平台有 `libcurl` 和 `libdatachannel`；嵌入式板如果暂时只需要 RTMP/RTSP/SRT/RTP，先用 `PUSHER_WHIP=OFF` 更稳。
+
+### C/C++ demo
+
+demo 默认只打印预览，不推流：
+
+```bash
+build/sdk/pusher_c_demo /dev/video0 rtmp://127.0.0.1:1935/live/camera
+build/sdk/pusher_cpp_demo sample.mp4 rtmp://127.0.0.1:1935/live/test
+```
+
+真正启动推流需要显式加 `--start`：
+
+```bash
+build/sdk/pusher_cpp_demo /dev/video0 rtmp://192.168.0.138:1935/live/camera0 --start
+```
+
+打包当前平台 SDK：
+
+```bash
+bash scripts/package_sdk.sh linux-x86_64 build/sdk
+```
+
+Windows：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package_sdk.ps1 -Platform windows-x64 -BuildDir build\sdk -Config Release
 ```
 
 ## 用例总览

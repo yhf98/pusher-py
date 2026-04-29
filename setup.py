@@ -14,7 +14,7 @@ ROOT = Path(__file__).parent
 LOCAL_INCLUDE = ROOT / "include"
 LOCAL_LIB = ROOT / "lib"
 IS_WINDOWS = sys.platform == "win32"
-FFMPEG_COMPONENTS = ("avformat", "avcodec", "avutil", "avdevice", "swscale", "swresample")
+FFMPEG_COMPONENTS = ("avformat", "avcodec", "avutil", "avdevice", "avfilter", "swscale", "swresample")
 
 
 def windows_import_library(component: str):
