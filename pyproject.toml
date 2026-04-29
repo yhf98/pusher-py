@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pusher-py"
-version = "0.1.8"
+version = "0.1.9"
 description = "A standard C/C++ native extension template for Python stream pusher plugins."
 readme = "README.md"
 requires-python = ">=3.9"

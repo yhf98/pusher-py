@@ -24,7 +24,10 @@ $RequiredSources = @(
     "ffbuild\library.mak",
     "libavformat\Makefile",
     "libavcodec\Makefile",
-    "libavutil\Makefile"
+    "libavutil\Makefile",
+    "libavdevice\Makefile",
+    "libswscale\Makefile",
+    "libswresample\Makefile"
 )
 $MissingSources = @(
     $RequiredSources | Where-Object { !(Test-Path (Join-Path $SourceDir $_)) }
@@ -208,7 +211,10 @@ $RequiredUnixSources = @(
     "$SourceUnix/ffbuild/library.mak",
     "$SourceUnix/libavformat/Makefile",
     "$SourceUnix/libavcodec/Makefile",
-    "$SourceUnix/libavutil/Makefile"
+    "$SourceUnix/libavutil/Makefile",
+    "$SourceUnix/libavdevice/Makefile",
+    "$SourceUnix/libswscale/Makefile",
+    "$SourceUnix/libswresample/Makefile"
 )
 foreach ($SourceFile in $RequiredUnixSources) {
     $CheckCommand = "test -f $(Quote-Sh $SourceFile)"
@@ -231,19 +237,24 @@ $ConfigureArgs = @(
     "--disable-autodetect",
     "--disable-asm",
     "--disable-x86asm",
-    "--disable-avfilter",
-    "--disable-avdevice",
-    "--disable-swscale",
-    "--disable-swresample",
+    "--enable-avdevice",
+    "--enable-swscale",
+    "--enable-swresample",
     "--enable-network",
     "--disable-everything",
     "--enable-avformat",
     "--enable-avcodec",
     "--enable-avutil",
+    "--enable-swscale",
+    "--enable-swresample",
+    "--enable-avdevice",
     "--enable-protocol=file,pipe,tcp,udp,rtmp,rtmpt,rtsp,http,rtp",
     "--enable-demuxer=mov,mp4,m4a,3gp,3g2,mj2,flv,rtsp,rtp,mpegts,h264,hevc,aac,matroska",
     "--enable-muxer=flv,rtsp,rtp,mpegts,null",
-    "--enable-parser=h264,hevc,aac,mpeg4video",
+    "--enable-indev=dshow",
+    "--enable-decoder=h264,mjpeg,rawvideo",
+    "--enable-encoder=h264_mf",
+    "--enable-parser=h264,hevc,aac,mpeg4video,mjpeg",
     "--enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc"
 )
 
@@ -270,6 +281,9 @@ $PrefixBinQ = Quote-Sh "$PrefixUnix/bin/"
 $BuildAvformatQ = Quote-Sh "$BuildUnix/libavformat/"
 $BuildAvcodecQ = Quote-Sh "$BuildUnix/libavcodec/"
 $BuildAvutilQ = Quote-Sh "$BuildUnix/libavutil/"
+$BuildAvdeviceQ = Quote-Sh "$BuildUnix/libavdevice/"
+$BuildSwscaleQ = Quote-Sh "$BuildUnix/libswscale/"
+$BuildSwresampleQ = Quote-Sh "$BuildUnix/libswresample/"
 $BuildJobsQ = Quote-Sh ([string]$BuildJobs)
 
 $BuildScript = Join-Path $BuildDir "build_ffmpeg_windows.sh"
@@ -286,21 +300,21 @@ $ScriptLines = @(
     "echo `"MSYS2 lib.exe: `$(command -v lib.exe || true)`"",
     "if [ ! -f config.mak ]; then $ConfigureCommand; fi",
     "echo `"FFmpeg selected build variables:`"",
-    "/usr/bin/grep -E '^(CONFIG_SHARED|CONFIG_STATIC|CONFIG_AVFORMAT|CONFIG_AVCODEC|CONFIG_AVUTIL|CC=|LD=|AR=|SLIBNAME|SLIBNAME_WITH_MAJOR|SLIBSUF|LIBSUF|SHFLAGS=)' ffbuild/config.mak || true",
+    "/usr/bin/grep -E '^(CONFIG_SHARED|CONFIG_STATIC|CONFIG_AVFORMAT|CONFIG_AVCODEC|CONFIG_AVUTIL|CONFIG_AVDEVICE|CONFIG_SWSCALE|CONFIG_SWRESAMPLE|CC=|LD=|AR=|SLIBNAME|SLIBNAME_WITH_MAJOR|SLIBSUF|LIBSUF|SHFLAGS=)' ffbuild/config.mak || true",
     "MAKE_BIN=$MsysMakeUnixQ",
     "if [ ! -x `"`$MAKE_BIN`" ]; then echo `"MSYS make was not found or is not executable: `$MAKE_BIN`" >&2; exit 1; fi",
     "case `"`$MAKE_BIN`" in */mingw*/bin/make) echo `"Refusing MinGW make for FFmpeg MSVC build: `$MAKE_BIN`" >&2; echo `"Install MSYS make, usually from the MSYS2 base-devel package.`" >&2; exit 1 ;; esac",
     "MAX_JOBS=$BuildJobsQ",
     "if [ `"`$MAX_JOBS`" != `"0`" ]; then JOBS=`"`$MAX_JOBS`"; elif command -v nproc >/dev/null 2>&1; then JOBS=`$(nproc); else JOBS=2; fi",
     "echo `"Using make: `$MAKE_BIN`"",
-    "`"`$MAKE_BIN`" -j`"`$JOBS`" libavutil/avutil.dll libavcodec/avcodec.dll libavformat/avformat.dll",
+    "`"`$MAKE_BIN`" -j`"`$JOBS`" libavutil/avutil.dll libswresample/swresample.dll libswscale/swscale.dll libavcodec/avcodec.dll libavformat/avformat.dll libavdevice/avdevice.dll",
     "`"`$MAKE_BIN`" install-libs install-headers",
     "echo `"Windows FFmpeg build-tree artifacts:`"",
     "/usr/bin/find . -maxdepth 3 -type f \( -name '*.dll' -o -name '*.lib' -o -name '*.def' -o -name '*.dll.a' \) -print | /usr/bin/sort",
     "echo `"Windows FFmpeg prefix artifacts:`"",
     "/usr/bin/find $PrefixUnixQ -maxdepth 4 -type f \( -name '*.dll' -o -name '*.lib' -o -name '*.def' -o -name '*.dll.a' \) -print | /usr/bin/sort",
     "/usr/bin/cp -a ${PrefixIncludeQ}* $RootIncludeQ",
-    "for pattern in ${PrefixLibQ}*.lib ${PrefixBinQ}*.lib ${PrefixBinQ}*.dll ${BuildAvformatQ}*.lib ${BuildAvformatQ}*.dll ${BuildAvcodecQ}*.lib ${BuildAvcodecQ}*.dll ${BuildAvutilQ}*.lib ${BuildAvutilQ}*.dll; do if [ -e `"`$pattern`" ]; then /usr/bin/cp -a `"`$pattern`" $RootLibQ; fi; done",
+    "for pattern in ${PrefixLibQ}*.lib ${PrefixBinQ}*.lib ${PrefixBinQ}*.dll ${BuildAvformatQ}*.lib ${BuildAvformatQ}*.dll ${BuildAvcodecQ}*.lib ${BuildAvcodecQ}*.dll ${BuildAvutilQ}*.lib ${BuildAvutilQ}*.dll ${BuildAvdeviceQ}*.lib ${BuildAvdeviceQ}*.dll ${BuildSwscaleQ}*.lib ${BuildSwscaleQ}*.dll ${BuildSwresampleQ}*.lib ${BuildSwresampleQ}*.dll; do if [ -e `"`$pattern`" ]; then /usr/bin/cp -a `"`$pattern`" $RootLibQ; fi; done",
     "/usr/bin/find $PrefixUnixQ $BuildUnixQ -maxdepth 4 -type f \( -name '*.dll' -o -name '*.lib' \) -exec /usr/bin/cp -a {} $RootLibQ \;",
     "echo `"Windows FFmpeg SDK lib directory:`"",
     "/usr/bin/find $RootLibQ -maxdepth 1 -type f | /usr/bin/sort"
@@ -322,7 +336,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$RequiredComponents = @("avformat", "avcodec", "avutil")
+$RequiredComponents = @("avformat", "avcodec", "avutil", "avdevice", "swscale", "swresample")
 
 $ArtifactRoots = @($BuildDir, $Prefix) | Where-Object { Test-Path $_ }
 Write-Host "PowerShell FFmpeg artifact scan:"

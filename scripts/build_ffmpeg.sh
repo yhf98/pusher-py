@@ -19,6 +19,9 @@ required_sources=(
   "libavformat/Makefile"
   "libavcodec/Makefile"
   "libavutil/Makefile"
+  "libavdevice/Makefile"
+  "libswscale/Makefile"
+  "libswresample/Makefile"
 )
 missing_sources=()
 for source_file in "${required_sources[@]}"; do
@@ -38,6 +41,13 @@ mkdir -p "${BUILD_DIR}" "${PREFIX}" "${ROOT_DIR}/include" "${ROOT_DIR}/lib"
 cd "${BUILD_DIR}"
 
 if [[ ! -f config.mak ]]; then
+  extra_configure_args=()
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists x264; then
+    extra_configure_args+=(--enable-gpl --enable-libx264 --enable-encoder=libx264)
+  else
+    extra_configure_args+=(--enable-encoder=h264_v4l2m2m)
+  fi
+
   "${SRC_DIR}/configure" \
     --prefix="${PREFIX}" \
     --enable-shared \
@@ -48,21 +58,26 @@ if [[ ! -f config.mak ]]; then
     --disable-autodetect \
     --disable-asm \
     --disable-x86asm \
-    --disable-avfilter \
-    --disable-avdevice \
-    --disable-swscale \
-    --disable-swresample \
+    --enable-avdevice \
+    --enable-swscale \
+    --enable-swresample \
     --enable-network \
     --disable-everything \
     --enable-avformat \
     --enable-avcodec \
     --enable-avutil \
+    --enable-swscale \
+    --enable-swresample \
+    --enable-avdevice \
     --enable-protocol=file,pipe,tcp,udp,rtmp,rtmpt,rtsp,http,rtp \
     --enable-demuxer=mov,mp4,m4a,3gp,3g2,mj2,flv,rtsp,rtp,mpegts,h264,hevc,aac,matroska \
     --enable-muxer=flv,rtsp,rtp,mpegts,mp4,null \
-    --enable-parser=h264,hevc,aac,mpeg4video \
+    --enable-indev=v4l2 \
+    --enable-decoder=h264,mjpeg,rawvideo \
+    --enable-parser=h264,hevc,aac,mpeg4video,mjpeg \
     --enable-bsf=h264_mp4toannexb,hevc_mp4toannexb,aac_adtstoasc \
-    --enable-pic
+    --enable-pic \
+    "${extra_configure_args[@]}"
 fi
 
 make -j"$(nproc)"

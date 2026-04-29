@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import subprocess
 import os
+import shlex
 from pathlib import Path
 
 from setuptools import Extension, setup
@@ -13,7 +14,7 @@ ROOT = Path(__file__).parent
 LOCAL_INCLUDE = ROOT / "include"
 LOCAL_LIB = ROOT / "lib"
 IS_WINDOWS = sys.platform == "win32"
-FFMPEG_COMPONENTS = ("avformat", "avcodec", "avutil")
+FFMPEG_COMPONENTS = ("avformat", "avcodec", "avutil", "avdevice", "swscale", "swresample")
 
 
 def windows_import_library(component: str):
@@ -68,6 +69,64 @@ def ffmpeg_library_names() -> list[str]:
             raise RuntimeError(f"missing FFmpeg import library for {component}")
         libraries.append(library)
     return libraries
+
+
+def run_pkg_config(args: list[str]) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["pkg-config", *args],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    return shlex.split(result.stdout)
+
+
+def parse_pkg_config_flags(flags: list[str]) -> tuple[list[str], list[str], list[str], list[str]]:
+    include_dirs: list[str] = []
+    library_dirs: list[str] = []
+    libraries: list[str] = []
+    extra_link_args: list[str] = []
+
+    for flag in flags:
+        if flag.startswith("-I") and len(flag) > 2:
+            include_dirs.append(flag[2:])
+        elif flag.startswith("-L") and len(flag) > 2:
+            library_dirs.append(flag[2:])
+        elif flag.startswith("-l") and len(flag) > 2:
+            libraries.append(flag[2:])
+        else:
+            extra_link_args.append(flag)
+
+    return include_dirs, library_dirs, libraries, extra_link_args
+
+
+def detect_whip_support() -> tuple[list[str], list[str], list[str], list[str], list[tuple[str, str]]]:
+    if IS_WINDOWS:
+        return [], [], [], [], []
+
+    rtc_header = Path("/usr/local/include/rtc/rtc.hpp")
+    datachannel_lib = Path("/usr/local/lib/libdatachannel.so")
+    curl_flags = run_pkg_config(["--cflags", "--libs", "libcurl"])
+    if not rtc_header.exists() or not datachannel_lib.exists() or not curl_flags:
+        return [], [], [], [], []
+
+    include_dirs, library_dirs, libraries, extra_link_args = parse_pkg_config_flags(curl_flags)
+    include_dirs.append("/usr/local/include")
+    library_dirs.append("/usr/local/lib")
+    libraries.append("datachannel")
+    extra_link_args.append("-Wl,-rpath,/usr/local/lib")
+
+    return (
+        list(dict.fromkeys(include_dirs)),
+        list(dict.fromkeys(library_dirs)),
+        list(dict.fromkeys(libraries)),
+        list(dict.fromkeys(extra_link_args)),
+        [("PUSHER_ENABLE_WHIP", "1")],
+    )
 
 
 def ensure_soname_links() -> None:
@@ -139,6 +198,7 @@ ensure_local_ffmpeg()
 
 ffmpeg_cflags = [f"-I{LOCAL_INCLUDE}"]
 ffmpeg_libraries = ffmpeg_library_names()
+whip_include_dirs, whip_library_dirs, whip_libraries, whip_link_args, whip_macros = detect_whip_support()
 
 ffmpeg_runtime_args: list[str] = []
 if sys.platform.startswith("linux") and LOCAL_LIB.exists():
@@ -180,15 +240,17 @@ native_extension = Extension(
     "pusher._native",
     sources=[
         "src/pusher/_native.cpp",
+        "src/pusher/camera_source.cpp",
         "src/pusher/pusher.cpp",
+        "src/pusher/stream_push/whip.cpp",
         "src/pusher/url_utils.c",
     ],
-    include_dirs=[str(ROOT / "include")],
-    library_dirs=[str(LOCAL_LIB)],
-    libraries=ffmpeg_libraries,
-    extra_link_args=ffmpeg_runtime_args,
+    include_dirs=[str(ROOT / "include"), *whip_include_dirs],
+    library_dirs=[str(LOCAL_LIB), *whip_library_dirs],
+    libraries=[*ffmpeg_libraries, *whip_libraries],
+    extra_link_args=[*ffmpeg_runtime_args, *whip_link_args],
     language="c++",
-    define_macros=[("PY_SSIZE_T_CLEAN", None)],
+    define_macros=[("PY_SSIZE_T_CLEAN", None), *whip_macros],
 )
 
 

@@ -11,11 +11,7 @@ from . import Pusher, build_output_url, detect_protocol
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--engine", choices=["auto", "libav", "ffmpeg", "stream_push"], default="auto")
-    parser.add_argument("--ffmpeg-path", default="ffmpeg")
-    parser.add_argument("--stream-push-path", default="stream_push")
     parser.add_argument("--log-path", default="")
-    parser.add_argument("--log-level", default="warning")
     parser.add_argument("--timeout-ms", type=int, default=5000)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
@@ -25,27 +21,21 @@ def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--probesize", type=int, default=50_000_000)
     parser.add_argument("--no-loop", action="store_true")
     parser.add_argument("--no-realtime", action="store_true")
-    parser.add_argument("--transcode", action="store_true", help="Use libx264 in ffmpeg process mode instead of codec copy.")
 
 
 def _make_pusher(args: argparse.Namespace) -> Pusher:
     return Pusher(
         name=getattr(args, "name", "cli"),
         timeout_ms=args.timeout_ms,
-        engine=args.engine,
-        ffmpeg_path=args.ffmpeg_path,
-        stream_push_path=args.stream_push_path,
         log_path=args.log_path,
         loop=not args.no_loop,
         realtime=not args.no_realtime,
-        copy_codecs=not args.transcode,
         width=args.width,
         height=args.height,
         fps=args.fps,
         bitrate=args.bitrate,
         analyzeduration_us=args.analyzeduration_us,
         probesize=args.probesize,
-        log_level=args.log_level,
     )
 
 
@@ -114,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pusher", description="Python C/C++ native stream pusher tool.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    push = subparsers.add_parser("push", help="Start a real push process.")
+    push = subparsers.add_parser("push", help="Start a native push worker.")
     push.add_argument("input")
     push.add_argument("output_url")
     push.add_argument("--name", default="cli")
@@ -122,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common_options(push)
     push.set_defaults(func=cmd_push)
 
-    preview = subparsers.add_parser("preview", help="Print the native command without starting it.")
+    preview = subparsers.add_parser("preview", help="Print the native worker description without starting it.")
     preview.add_argument("input")
     preview.add_argument("output_url")
     preview.add_argument("--name", default="preview")

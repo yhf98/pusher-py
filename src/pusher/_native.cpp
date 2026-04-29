@@ -11,7 +11,7 @@
 
 namespace {
 
-constexpr const char *kVersion = "0.1.8";
+constexpr const char *kVersion = "0.1.9";
 
 #define PUSHER_METHOD_CAST(func) \
     reinterpret_cast<PyCFunction>(reinterpret_cast<void (*)(void)>(func))
@@ -113,47 +113,38 @@ static int PyNativePusher_init(PyNativePusher *self, PyObject *args, PyObject *k
     int timeout_ms = 5000;
     int auto_reconnect = 1;
     const char *engine = "auto";
-    const char *ffmpeg_path = "ffmpeg";
-    const char *stream_push_path = "stream_push";
     const char *log_path = "";
     int loop = 1;
     int realtime = 1;
-    int copy_codecs = 1;
     int width = 1280;
     int height = 720;
     int fps = 30;
     int bitrate = 2000000;
     long long analyzeduration_us = 10000000;
     long long probesize = 50000000;
-    const char *log_level = "warning";
 
     static char *kwlist[] = {
         const_cast<char *>("name"),
         const_cast<char *>("timeout_ms"),
         const_cast<char *>("auto_reconnect"),
         const_cast<char *>("engine"),
-        const_cast<char *>("ffmpeg_path"),
-        const_cast<char *>("stream_push_path"),
         const_cast<char *>("log_path"),
         const_cast<char *>("loop"),
         const_cast<char *>("realtime"),
-        const_cast<char *>("copy_codecs"),
         const_cast<char *>("width"),
         const_cast<char *>("height"),
         const_cast<char *>("fps"),
         const_cast<char *>("bitrate"),
         const_cast<char *>("analyzeduration_us"),
         const_cast<char *>("probesize"),
-        const_cast<char *>("log_level"),
         nullptr,
     };
 
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwargs, "|sipszzzpppiiiiLLs", kwlist,
+            args, kwargs, "|sipszppiiiiLL", kwlist,
             &name, &timeout_ms, &auto_reconnect,
-            &engine, &ffmpeg_path, &stream_push_path, &log_path,
-            &loop, &realtime, &copy_codecs,
-            &width, &height, &fps, &bitrate, &analyzeduration_us, &probesize, &log_level)) {
+            &engine, &log_path, &loop, &realtime,
+            &width, &height, &fps, &bitrate, &analyzeduration_us, &probesize)) {
         return -1;
     }
 
@@ -166,19 +157,15 @@ static int PyNativePusher_init(PyNativePusher *self, PyObject *args, PyObject *k
         config.timeout_ms = timeout_ms;
         config.auto_reconnect = auto_reconnect != 0;
         config.engine = engine == nullptr ? "auto" : engine;
-        config.ffmpeg_path = ffmpeg_path == nullptr ? "ffmpeg" : ffmpeg_path;
-        config.stream_push_path = stream_push_path == nullptr ? "stream_push" : stream_push_path;
         config.log_path = log_path == nullptr ? "" : log_path;
         config.loop = loop != 0;
         config.realtime = realtime != 0;
-        config.copy_codecs = copy_codecs != 0;
         config.width = width;
         config.height = height;
         config.fps = fps;
         config.bitrate = bitrate;
         config.analyzeduration_us = analyzeduration_us;
         config.probesize = probesize;
-        config.log_level = log_level == nullptr ? "warning" : log_level;
         self->impl = new pusher::NativePusher(config);
     } catch (const std::invalid_argument &error) {
         PyErr_SetString(PyExc_ValueError, error.what());
@@ -362,7 +349,7 @@ static PyMethodDef PyNativePusher_methods[] = {
     {"stop", PUSHER_METHOD_CAST(PyNativePusher_stop), METH_VARARGS | METH_KEYWORDS,
      PyDoc_STR("Stop the native pusher session.")},
     {"wait", PUSHER_METHOD_CAST(PyNativePusher_wait), METH_VARARGS | METH_KEYWORDS,
-     PyDoc_STR("Wait for the native pusher process. Return exit code, or None on timeout.")},
+     PyDoc_STR("Wait for the native pusher worker. Return exit code, or None on timeout.")},
     {"status", PUSHER_METHOD_CAST(PyNativePusher_status), METH_NOARGS,
      PyDoc_STR("Return current pusher status.")},
     {"preview_command", PUSHER_METHOD_CAST(PyNativePusher_preview_command), METH_VARARGS | METH_KEYWORDS,
@@ -386,9 +373,9 @@ static PyGetSetDef PyNativePusher_getset[] = {
     {const_cast<char *>("name"), reinterpret_cast<getter>(PyNativePusher_get_name), nullptr,
      const_cast<char *>("Pusher instance name."), nullptr},
     {const_cast<char *>("pid"), reinterpret_cast<getter>(PyNativePusher_get_pid), nullptr,
-     const_cast<char *>("Native process id, or -1 when stopped."), nullptr},
+     const_cast<char *>("Always -1; native push runs in worker threads."), nullptr},
     {const_cast<char *>("exit_code"), reinterpret_cast<getter>(PyNativePusher_get_exit_code), nullptr,
-     const_cast<char *>("Process exit code after completion, otherwise None."), nullptr},
+     const_cast<char *>("Worker exit code after completion, otherwise None."), nullptr},
     {nullptr, nullptr, nullptr, nullptr, nullptr},
 };
 

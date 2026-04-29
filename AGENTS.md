@@ -10,7 +10,7 @@ This is a Python package with a native C/C++ streaming extension. Core code live
 - `python setup.py build_ext --inplace --force`: rebuild the native extension. If `lib/libavformat.so` is missing, this invokes `scripts/build_ffmpeg.sh`.
 - `powershell -File scripts/build_ffmpeg.ps1 -Arch AMD64`: build the Windows FFmpeg SDK from a Visual Studio Developer shell; use `x86` or `ARM64` for other Windows wheels.
 - `python -m pytest -q`: run the pytest suite configured in `pyproject.toml`.
-- `PYTHONPATH=src python -m pusher.cli preview sample.mp4 rtmp://127.0.0.1/live/test`: inspect the generated push command without starting a real stream.
+- `PYTHONPATH=src python -m pusher.cli preview sample.mp4 rtmp://127.0.0.1/live/test`: inspect the generated native worker description without starting a real stream.
 
 ## Coding Style & Naming Conventions
 
@@ -18,7 +18,7 @@ Use 4-space indentation for Python, type hints for public or non-trivial functio
 
 ## Testing Guidelines
 
-Tests use pytest, with files named `test_*.py` and test functions named `test_*`. Prefer fast unit tests for URL building, protocol detection, CLI preview output, and lifecycle behavior that avoids real network streams. Existing tests use `/bin/true` or `preview_command()` to keep subprocess behavior deterministic. After native or packaging changes, rebuild with `build_ext` before running pytest.
+Tests use pytest, with files named `test_*.py` and test functions named `test_*`. Prefer fast unit tests for URL building, protocol detection, CLI preview output, and lifecycle behavior that avoids real network streams. Existing tests use `preview_command()` to keep native behavior deterministic. After native or packaging changes, rebuild with `build_ext` before running pytest.
 
 ## Commit & Pull Request Guidelines
 
